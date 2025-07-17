@@ -1,32 +1,50 @@
+// src/app/admin/products/new/page.tsx
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 
 export default function AddProductPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
-  const [previewImage, setPreviewImage] = useState(null)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     price: '',
-    discountPrice: '',
-    category: 'shared',
+    discountPercentage: '',
+    category: 'Shared Hosting',
     features: [''],
-    isPopular: false,
-    image: null
+    imageUrl: '',
+    isPopular: false
   })
+  const [calculatedDiscountPrice, setCalculatedDiscountPrice] = useState<string>('')
 
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target
+  // Hitung harga diskon otomatis
+  useEffect(() => {
+    const price = parseFloat(formData.price)
+    const discountPercentage = parseFloat(formData.discountPercentage)
+    
+    if (!isNaN(price) && !isNaN(discountPercentage)) {
+      const discountAmount = price * (discountPercentage / 100)
+      const discountedPrice = price - discountAmount
+      setCalculatedDiscountPrice(discountedPrice.toFixed(0))
+    } else {
+      setCalculatedDiscountPrice('')
+    }
+  }, [formData.price, formData.discountPercentage])
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target
+    const checked = (e.target as HTMLInputElement).checked
+    
     setFormData(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }))
   }
 
-  const handleFeatureChange = (index, value) => {
+  const handleFeatureChange = (index: number, value: string) => {
     const newFeatures = [...formData.features]
     newFeatures[index] = value
     setFormData(prev => ({ ...prev, features: newFeatures }))
@@ -36,24 +54,24 @@ export default function AddProductPage() {
     setFormData(prev => ({ ...prev, features: [...prev.features, ''] }))
   }
 
-  const removeFeatureField = (index) => {
+  const removeFeatureField = (index: number) => {
     const newFeatures = formData.features.filter((_, i) => i !== index)
     setFormData(prev => ({ ...prev, features: newFeatures }))
   }
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0]
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
     if (file) {
-      setFormData(prev => ({ ...prev, image: file }))
       const reader = new FileReader()
       reader.onloadend = () => {
-        setPreviewImage(reader.result)
+        setPreviewImage(reader.result as string)
+        setFormData(prev => ({ ...prev, imageUrl: reader.result as string }))
       }
       reader.readAsDataURL(file)
     }
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
@@ -62,19 +80,22 @@ export default function AddProductPage() {
       formDataToSend.append('name', formData.name)
       formDataToSend.append('description', formData.description)
       formDataToSend.append('price', formData.price)
-      formDataToSend.append('discountPrice', formData.discountPrice)
+      formDataToSend.append('discountPercentage', formData.discountPercentage)
       formDataToSend.append('category', formData.category)
-      formDataToSend.append('isPopular', formData.isPopular)
+      formDataToSend.append('isPopular', formData.isPopular.toString())
       formData.features.forEach(feature => {
         formDataToSend.append('features', feature)
       })
-      if (formData.image) {
-        formDataToSend.append('image', formData.image)
+      
+      // Jika ada file gambar, tambahkan ke FormData
+      if (previewImage && formData.imageUrl) {
+        const blob = await fetch(formData.imageUrl).then(r => r.blob())
+        formDataToSend.append('image', blob, 'product-image.jpg')
       }
 
       const response = await fetch('/api/admin/products', {
         method: 'POST',
-        body: formDataToSend
+        body: formDataToSend // Tidak perlu headers Content-Type untuk FormData
       })
 
       if (!response.ok) {
@@ -84,10 +105,20 @@ export default function AddProductPage() {
       toast.success('Produk berhasil ditambahkan!')
       router.push('/admin/products')
     } catch (error) {
-      toast.error(error.message)
+      toast.error(error instanceof Error ? error.message : 'Terjadi kesalahan')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Fungsi format Rupiah
+  const formatRupiah = (value: string) => {
+    const number = parseFloat(value) || 0
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(number)
   }
 
   return (
@@ -174,11 +205,12 @@ export default function AddProductPage() {
             />
           </div>
 
-          {/* Harga */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Harga dan Diskon */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Harga Normal */}
             <div>
               <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
-                Harga Normal (per bulan)
+                Harga Normal
               </label>
               <div className="relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -193,27 +225,57 @@ export default function AddProductPage() {
                   required
                   className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   placeholder="0"
+                  min="0"
+                />
+              </div>
+              {formData.price && (
+                <p className="mt-1 text-sm text-gray-500">
+                  {formatRupiah(formData.price)}/bulan
+                </p>
+              )}
+            </div>
+
+            {/* Persentase Diskon */}
+            <div>
+              <label htmlFor="discountPercentage" className="block text-sm font-medium text-gray-700 mb-1">
+                Diskon (%)
+              </label>
+              <div className="relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                  <span className="text-gray-500">%</span>
+                </div>
+                <input
+                  type="number"
+                  id="discountPercentage"
+                  name="discountPercentage"
+                  value={formData.discountPercentage}
+                  onChange={handleInputChange}
+                  className="block w-full pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="0"
+                  min="0"
+                  max="100"
                 />
               </div>
             </div>
 
+            {/* Harga Setelah Diskon */}
             <div>
-              <label htmlFor="discountPrice" className="block text-sm font-medium text-gray-700 mb-1">
-                Harga Diskon (opsional)
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Harga Setelah Diskon
               </label>
-              <div className="relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <span className="text-gray-500">Rp</span>
-                </div>
-                <input
-                  type="number"
-                  id="discountPrice"
-                  name="discountPrice"
-                  value={formData.discountPrice}
-                  onChange={handleInputChange}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="0"
-                />
+              <div className="p-2 border border-gray-300 rounded-md bg-gray-50">
+                {calculatedDiscountPrice ? (
+                  <div>
+                    <p className="font-medium text-green-600">
+                      {formatRupiah(calculatedDiscountPrice)}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Hemat {formatRupiah((parseFloat(formData.price) - parseFloat(calculatedDiscountPrice)).toString())}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-gray-500">Masukkan harga dan diskon</p>
+                )}
               </div>
             </div>
           </div>
@@ -230,12 +292,13 @@ export default function AddProductPage() {
                 value={formData.category}
                 onChange={handleInputChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
               >
-                <option value="shared">Shared Hosting</option>
-                <option value="vps">VPS Hosting</option>
-                <option value="wordpress">WordPress Hosting</option>
-                <option value="email">Email Hosting</option>
-                <option value="cloud">Cloud Hosting</option>
+                <option value="Shared Hosting">Shared Hosting</option>
+                <option value="VPS">VPS</option>
+                <option value="Cloud Hosting">Cloud Hosting</option>
+                <option value="WordPress Hosting">WordPress Hosting</option>
+                <option value="Dedicated Server">Dedicated Server</option>
               </select>
             </div>
 
@@ -264,7 +327,7 @@ export default function AddProductPage() {
                     type="text"
                     value={feature}
                     onChange={(e) => handleFeatureChange(index, e.target.value)}
-                    required
+                    required={index === 0}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     placeholder={`Fitur ${index + 1}`}
                   />

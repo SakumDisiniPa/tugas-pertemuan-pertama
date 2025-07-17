@@ -1,3 +1,4 @@
+// src/app/admin/product/DeleteButton.tsx
 'use client'
 
 import { useTransition } from 'react'
